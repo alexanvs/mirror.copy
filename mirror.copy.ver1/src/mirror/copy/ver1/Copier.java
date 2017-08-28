@@ -58,6 +58,7 @@ public class Copier {
 			switch (param) {
 			case DEBUG: {
 				debugOn = true;
+				break;
 			}
 			case STEP1: {
 				mode = STEP1;
@@ -172,7 +173,8 @@ public class Copier {
 				String md5 = getMD5Checksum(nextChild);
 				int endOfSource = results.getFolder().getAbsolutePath().length();
 				String relativePath = nextChild.getAbsolutePath().substring(endOfSource);
-				results.addChecksum(md5, relativePath);
+				ChecksumIdentifier checksum = new ChecksumIdentifier(md5);
+				results.addChecksum(checksum, relativePath);
 
 			}
 		}
@@ -236,11 +238,11 @@ public class Copier {
 			System.exit(2);
 		}
 
-		Map<String, List<String>> tableR = new HashMap<>();
-		Map<String, List<String>> tableI = new HashMap<>();
+		Map<Identifier, List<String>> tableR = new HashMap<>();
+		Map<Identifier, List<String>> tableI = new HashMap<>();
 
-		for (Map.Entry<String, List<String>> entry : results1.getChecksums().entrySet()) {
-			String key = entry.getKey();
+		for (Map.Entry<Identifier, List<String>> entry : results1.getChecksums().entrySet()) {
+			Identifier key = entry.getKey();
 			List<String> values1 = entry.getValue();
 			if (results2.getChecksums().containsKey(key)) {
 				List<String> values2 = results2.getChecksums().get(key);
@@ -255,8 +257,8 @@ public class Copier {
 			}
 		}
 
-		for (Map.Entry<String, List<String>> entry : results2.getChecksums().entrySet()) {
-			String key = entry.getKey();
+		for (Map.Entry<Identifier, List<String>> entry : results2.getChecksums().entrySet()) {
+			Identifier key = entry.getKey();
 			List<String> values2 = entry.getValue();
 			if (results1.getChecksums().containsKey(key)) {
 				List<String> values1 = results1.getChecksums().get(key);
@@ -276,10 +278,10 @@ public class Copier {
 			System.out.println("[debug output tableI:]");
 			printmap(tableI);
 		}
-		Iterator<String> it1 = tableR.keySet().iterator();
+		Iterator<Identifier> it1 = tableR.keySet().iterator();
 
 		while (it1.hasNext()) {
-			String s = it1.next();
+			Identifier s = it1.next();
 
 			if (tableI.keySet().contains(s)) {
 
@@ -312,10 +314,10 @@ public class Copier {
 
 		}
 
-		Iterator<String> it2 = tableI.keySet().iterator();
+		Iterator<Identifier> it2 = tableI.keySet().iterator();
 
 		while (it2.hasNext()) {
-			String s = it2.next();
+			Identifier s = it2.next();
 			for (int i = 0; i < tableI.get(s).size(); i++) {
 				copyFileFromTo(results1.getFolder().getAbsolutePath(), tableI.get(s).get(i), target.getAbsolutePath(), tableI.get(s).get(i));
 			}
@@ -353,8 +355,8 @@ public class Copier {
 		}
 	}
 
-	private static void printmap(Map<String, List<String>> map) {
-		for (Entry<String, List<String>> q : map.entrySet()) {
+	private static void printmap(Map<Identifier, List<String>> map) {
+		for (Entry<Identifier, List<String>> q : map.entrySet()) {
 			System.out.println(q.getKey() + " " + q.getValue());
 		}
 	}
@@ -372,10 +374,46 @@ public class Copier {
 		return work.isEmpty();
 	}
 
+	private static interface Identifier {
+
+	}
+
+	private static class ChecksumIdentifier implements Identifier, Serializable {
+		private static final long serialVersionUID = 4096973732600424847L;
+		private String checksum;
+
+		public ChecksumIdentifier(String checksum) {
+			this.checksum = checksum;
+		}
+
+		public String get() {
+			return checksum;
+		}
+
+		@Override
+		public String toString() {
+			return checksum;
+		}
+
+		@Override
+		public boolean equals(Object obj) {
+			if (obj instanceof ChecksumIdentifier) {
+				ChecksumIdentifier other = (ChecksumIdentifier) obj;
+				return this.get().equals(other.get());
+			}
+			return super.equals(obj);
+		}
+
+		@Override
+		public int hashCode() {
+			return checksum.hashCode();
+		}
+	}
+
 	private static class FolderInfo implements Serializable {
 		private static final long serialVersionUID = -4900864651526989655L;
 		private File folder = null;
-		private Map<String, List<String>> checksums = new HashMap<>();
+		private Map<Identifier, List<String>> checksumsToLocs = new HashMap<>();
 
 		public FolderInfo(File folder) {
 			this.folder = folder;
@@ -385,17 +423,17 @@ public class Copier {
 			return folder;
 		}
 
-		public Map<String, List<String>> getChecksums() {
-			return checksums;
+		public Map<Identifier, List<String>> getChecksums() {
+			return checksumsToLocs;
 		}
 
-		public void addChecksum(String checksum, String relativePath) {
-			checksums.putIfAbsent(checksum, new ArrayList<String>());
-			checksums.get(checksum).add(relativePath);
+		public void addChecksum(Identifier checksum, String relativePath) {
+			checksumsToLocs.putIfAbsent(checksum, new ArrayList<String>());
+			checksumsToLocs.get(checksum).add(relativePath);
 		}
 
-		public List<String> getRelativePaths(String checksum) {
-			return checksums.get(checksum);
+		public List<String> getRelativePaths(Identifier checksum) {
+			return checksumsToLocs.get(checksum);
 		}
 
 		@Override
@@ -406,9 +444,9 @@ public class Copier {
 				if (getChecksums().size() != other.getChecksums().size()) {
 					return false;
 				}
-				for (Map.Entry<String, List<String>> entry : checksums.entrySet()) {
+				for (Map.Entry<Identifier, List<String>> entry : checksumsToLocs.entrySet()) {
 
-					String checksum = entry.getKey();
+					Identifier checksum = entry.getKey();
 					List<String> pathsForChecksum = entry.getValue();
 
 					List<String> pathsForChecksumInOther = other.getRelativePaths(checksum);
