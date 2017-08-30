@@ -17,6 +17,8 @@ import java.io.ObjectInputStream;
 import java.io.ObjectOutputStream;
 import java.io.Serializable;
 import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.attribute.BasicFileAttributes;
 import java.security.MessageDigest;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -32,7 +34,9 @@ public class Copier {
 	private static final String SOURCE = "-source";
 	private static final String TARGET = "-target";
 	private static final String DEBUG = "-debug";
+	private static final String METHOD = "-method";
 	private static String mode = null;
+	private static String method = "checksums"; // default
 	private static String sourceFolderString;
 	private static String targetFolderString;
 
@@ -45,9 +49,10 @@ public class Copier {
 		System.out.println("You need to run this program 2 times. First, before the rename and specify a source folder.");
 		System.out.println("Second, after the rename and specify a target folder.\n");
 		System.out.println("Usage:");
-		System.out.println("java -jar mirror.copy.ver1.jar step1 -source <path_to_source_folder>");
+		System.out.println("java -jar mirror.copy.ver1.jar step1 -source <path_to_source_folder> [-method <Method>]");
 		System.out.println("...");
-		System.out.println("java -jar mirror.copy.ver1.jar step2 -target <path_to_target_folder>\n\n");
+		System.out.println("java -jar mirror.copy.ver1.jar step2 -target <path_to_target_folder> [-method <Method>]");
+		System.out.println("where <Method> is checksums or dateAndSize.\n\n");
 		if (args == null || args.length == 0) {
 			System.out.println("Please specify arguments.");
 			System.exit(1);
@@ -86,6 +91,22 @@ public class Copier {
 				targetFolderString = args[i];
 				break;
 			}
+			case METHOD: {
+				i++;
+				if (args.length < i) {
+					System.out.println("No method specified.");
+					System.exit(1);
+				}
+				if (args[i].equals("dateAndSize")) {
+					method = "dateAndSize";
+					break;
+				}
+				if (!args[i].equals("checksums")) {
+					System.out.println("Incorrect method specified: " + args[i]);
+					System.exit(1);
+				}
+				break;
+			}
 			default: {
 				System.out.println("Incorrect argument " + param);
 				System.exit(1);
@@ -106,7 +127,7 @@ public class Copier {
 			doStep1(source, results1);
 			if (debugOn) {
 				System.out.println("[debug output1:]");
-				printmap(results1.getChecksums());
+				printmap(results1.getIds());
 			}
 			File savedChecksum = new File("./saved.checksum");
 			if (savedChecksum.exists()) {
@@ -170,12 +191,21 @@ public class Copier {
 			if (nextChild.isDirectory()) {
 				doStep1(nextChild, results);
 			} else {
-				String md5 = getMD5Checksum(nextChild);
-				int endOfSource = results.getFolder().getAbsolutePath().length();
-				String relativePath = nextChild.getAbsolutePath().substring(endOfSource);
-				ChecksumIdentifier checksum = new ChecksumIdentifier(md5);
-				results.addChecksum(checksum, relativePath);
-
+				Path folderPath = results.getFolder().toPath();
+				Path childFilePath = nextChild.toPath();
+				String relativePath = folderPath.relativize(childFilePath).toString();
+				Identifier id = null;
+				switch (method) {
+				case "checksums":
+					String md5 = getMD5Checksum(nextChild);
+					id = new ChecksumIdentifier(md5);
+					break;
+				case "dateAndSize":
+					BasicFileAttributes attr = Files.readAttributes(childFilePath, BasicFileAttributes.class);
+					id = new DateAndSizeIdentifier(attr.size(), attr.creationTime().toMillis(), attr.lastModifiedTime().toMillis(), attr.lastAccessTime().toMillis());
+					break;
+				}
+				results.addId(id, relativePath);
 			}
 		}
 
@@ -202,7 +232,7 @@ public class Copier {
 		}
 		if (debugOn) {
 			System.out.println("[debug output results1:]");
-			printmap(results1.getChecksums());
+			printmap(results1.getIds());
 		}
 
 		results2 = new FolderInfo(results1.getFolder());
@@ -214,7 +244,7 @@ public class Copier {
 		}
 		if (debugOn) {
 			System.out.println("[debug output results2:]");
-			printmap(results2.getChecksums());
+			printmap(results2.getIds());
 		}
 		if (results2.equals(results1)) {
 			System.out.println("Nothing changed in source folder " + results1.getFolder().getAbsolutePath());
@@ -241,11 +271,11 @@ public class Copier {
 		Map<Identifier, List<String>> tableR = new HashMap<>();
 		Map<Identifier, List<String>> tableI = new HashMap<>();
 
-		for (Map.Entry<Identifier, List<String>> entry : results1.getChecksums().entrySet()) {
+		for (Map.Entry<Identifier, List<String>> entry : results1.getIds().entrySet()) {
 			Identifier key = entry.getKey();
 			List<String> values1 = entry.getValue();
-			if (results2.getChecksums().containsKey(key)) {
-				List<String> values2 = results2.getChecksums().get(key);
+			if (results2.getIds().containsKey(key)) {
+				List<String> values2 = results2.getIds().get(key);
 				List<String> copy = new ArrayList<>();
 				copy.addAll(values1);
 				copy.removeAll(values2);
@@ -257,11 +287,11 @@ public class Copier {
 			}
 		}
 
-		for (Map.Entry<Identifier, List<String>> entry : results2.getChecksums().entrySet()) {
+		for (Map.Entry<Identifier, List<String>> entry : results2.getIds().entrySet()) {
 			Identifier key = entry.getKey();
 			List<String> values2 = entry.getValue();
-			if (results1.getChecksums().containsKey(key)) {
-				List<String> values1 = results1.getChecksums().get(key);
+			if (results1.getIds().containsKey(key)) {
+				List<String> values1 = results1.getIds().get(key);
 				List<String> copy = new ArrayList<>();
 				copy.addAll(values2);
 				copy.removeAll(values1);
@@ -305,7 +335,7 @@ public class Copier {
 				tableI.remove(s);
 			} else {
 				// {remove file s from Target folder from locations tableR.get(s);
-				// remove this s record from tableR: it.remove();}
+				// remove this s record from tableR: it1.remove();}
 				for (int i = 0; i < tableR.get(s).size(); i++) {
 					deleteFileFrom(target.getAbsolutePath(), tableR.get(s).get(i));
 				}
@@ -326,16 +356,16 @@ public class Copier {
 	}
 
 	private static void moveFileFromTo(String fromFolder, String loc1, String toFolder, String loc2) {
-		System.out.println("Move " + fromFolder + loc1 + " to " + toFolder + loc2);
-		File moveWhat = new File(fromFolder + loc1);
-		File moveWhere = new File(toFolder + loc2);
+		File moveWhat = new File(fromFolder, loc1);
+		File moveWhere = new File(toFolder, loc2);
+		System.out.println("Move " + moveWhat.getAbsolutePath() + " to " + moveWhere.getAbsolutePath());
 		moveWhere.getParentFile().mkdirs();
 		moveWhat.renameTo(moveWhere);
 	}
 
 	private static void deleteFileFrom(String fromFolder, String location) {
-		System.out.println("Delete " + fromFolder + location);
-		File file = new File(fromFolder + location);
+		File file = new File(fromFolder, location);
+		System.out.println("Delete " + file.getAbsolutePath());
 		if (file.exists()) {
 			file.delete();
 		} else {
@@ -344,10 +374,10 @@ public class Copier {
 	}
 
 	private static void copyFileFromTo(String fromFolder, String loc1, String toFolder, String loc2) {
-		System.out.println("Copy " + fromFolder + loc1 + " to " + toFolder + loc2);
+		File copyFrom = new File(fromFolder, loc1);
+		File copyTo = new File(toFolder, loc2);
+		System.out.println("Copy " + copyFrom.getAbsolutePath() + " to " + copyTo.getAbsolutePath());
 		try {
-			File copyFrom = new File(fromFolder + loc1);
-			File copyTo = new File(toFolder + loc2);
 			copyTo.getParentFile().mkdirs();
 			Files.copy(copyFrom.toPath(), copyTo.toPath());
 		} catch (IOException e) {
@@ -375,7 +405,7 @@ public class Copier {
 	}
 
 	private static interface Identifier {
-
+		boolean equals(Object obj);
 	}
 
 	private static class ChecksumIdentifier implements Identifier, Serializable {
@@ -410,10 +440,49 @@ public class Copier {
 		}
 	}
 
+	private static class DateAndSizeIdentifier implements Identifier, Serializable {
+		private static final long serialVersionUID = 1556713477972745796L;
+		private long size = 0;
+		private long creationTime = 0;
+		private long modificationTime = 0;
+		private long accessTime = 0;
+
+		public DateAndSizeIdentifier(long size, long creationTime, long modifiedTime, long accessTime) {
+			this.size = size;
+			this.creationTime = creationTime;
+			this.modificationTime = modifiedTime;
+			this.accessTime = accessTime;
+		}
+
+		public String toString() {
+			return size + "|" + creationTime + "|" + modificationTime + "|" + accessTime;
+		}
+
+		public boolean equals(Object obj) {
+			if (obj instanceof DateAndSizeIdentifier) {
+				DateAndSizeIdentifier other = (DateAndSizeIdentifier) obj;
+				if (size != other.size) {
+					return false;
+				}
+				if (modificationTime != other.modificationTime) {
+					return false;
+				}
+				return true;
+			}
+			return false;
+		}
+
+		@Override
+		public int hashCode() {
+			return (int) (size + modificationTime);
+		}
+
+	}
+
 	private static class FolderInfo implements Serializable {
 		private static final long serialVersionUID = -4900864651526989655L;
 		private File folder = null;
-		private Map<Identifier, List<String>> checksumsToLocs = new HashMap<>();
+		private Map<Identifier, List<String>> idsToLocs = new HashMap<>();
 
 		public FolderInfo(File folder) {
 			this.folder = folder;
@@ -423,17 +492,17 @@ public class Copier {
 			return folder;
 		}
 
-		public Map<Identifier, List<String>> getChecksums() {
-			return checksumsToLocs;
+		public Map<Identifier, List<String>> getIds() {
+			return idsToLocs;
 		}
 
-		public void addChecksum(Identifier checksum, String relativePath) {
-			checksumsToLocs.putIfAbsent(checksum, new ArrayList<String>());
-			checksumsToLocs.get(checksum).add(relativePath);
+		public void addId(Identifier id, String relativePath) {
+			idsToLocs.putIfAbsent(id, new ArrayList<String>());
+			idsToLocs.get(id).add(relativePath);
 		}
 
-		public List<String> getRelativePaths(Identifier checksum) {
-			return checksumsToLocs.get(checksum);
+		public List<String> getRelativePaths(Identifier id) {
+			return idsToLocs.get(id);
 		}
 
 		@Override
@@ -441,10 +510,10 @@ public class Copier {
 			if (obj instanceof FolderInfo) {
 				FolderInfo other = (FolderInfo) obj;
 
-				if (getChecksums().size() != other.getChecksums().size()) {
+				if (getIds().size() != other.getIds().size()) {
 					return false;
 				}
-				for (Map.Entry<Identifier, List<String>> entry : checksumsToLocs.entrySet()) {
+				for (Map.Entry<Identifier, List<String>> entry : idsToLocs.entrySet()) {
 
 					Identifier checksum = entry.getKey();
 					List<String> pathsForChecksum = entry.getValue();
@@ -463,7 +532,7 @@ public class Copier {
 
 		@Override
 		public int hashCode() {
-			return getChecksums().hashCode();
+			return getIds().hashCode();
 		}
 
 	}

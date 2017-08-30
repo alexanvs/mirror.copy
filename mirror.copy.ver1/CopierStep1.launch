@@ -7,6 +7,6 @@
 <listEntry value="1"/>
 </listAttribute>
 <stringAttribute key="org.eclipse.jdt.launching.MAIN_TYPE" value="mirror.copy.ver1.Copier"/>
-<stringAttribute key="org.eclipse.jdt.launching.PROGRAM_ARGUMENTS" value="step1 -source C:/test/ -debug"/>
+<stringAttribute key="org.eclipse.jdt.launching.PROGRAM_ARGUMENTS" value="step1 -source C:/test/ -method dateAndSize -debug"/>
 <stringAttribute key="org.eclipse.jdt.launching.PROJECT_ATTR" value="mirror.copy.ver1"/>
 </launchConfiguration>
