@@ -50,9 +50,9 @@ public class Copier {
 		System.out.println("Second, after the rename and specify a target folder.\n");
 		System.out.println("Usage:");
 		System.out.println("java -jar mirror.copy.ver1.jar step1 -source <path_to_source_folder> [-method <Method>]");
+		System.out.println("where <Method> is checksums or dateAndSize.");
 		System.out.println("...");
-		System.out.println("java -jar mirror.copy.ver1.jar step2 -target <path_to_target_folder> [-method <Method>]");
-		System.out.println("where <Method> is checksums or dateAndSize.\n\n");
+		System.out.println("java -jar mirror.copy.ver1.jar step2 -target <path_to_target_folder>\n\n");
 		if (args == null || args.length == 0) {
 			System.out.println("Please specify arguments.");
 			System.exit(1);
@@ -123,7 +123,10 @@ public class Copier {
 				System.out.println("Source folder is not a directory or does not exist.");
 				System.exit(1);
 			}
-			results1 = new FolderInfo(source);
+			results1 = new FolderInfo(source, method);
+
+			long timeStart = System.currentTimeMillis();
+
 			doStep1(source, results1);
 			if (debugOn) {
 				System.out.println("[debug output1:]");
@@ -138,6 +141,9 @@ public class Copier {
 			ObjectOutputStream oos = new ObjectOutputStream(new FileOutputStream(savedChecksum));
 			oos.writeObject(results1);
 			oos.close();
+
+			long timeEnd = System.currentTimeMillis();
+			System.out.println("Time used for Step 1: " + (timeEnd - timeStart) + "ms");
 			System.out.println("Step 1 is completed. You can now modify this folder and replay your changes running Step 2 afterwards.");
 
 		}
@@ -152,7 +158,10 @@ public class Copier {
 				System.out.println("Target folder is not a directory or does not exist.");
 				System.exit(1);
 			}
+			long timeStart = System.currentTimeMillis();
 			doStep2(target, debugOn);
+			long timeEnd = System.currentTimeMillis();
+			System.out.println("Time used for Step 2: " + (timeEnd - timeStart) + "ms");
 			System.out.println("Step 2 completed.");
 		}
 
@@ -234,14 +243,27 @@ public class Copier {
 			System.out.println("[debug output results1:]");
 			printmap(results1.getIds());
 		}
-
-		results2 = new FolderInfo(results1.getFolder());
+		method = results1.getMethod();
+		System.out.println("Method used in Step 1: " + method);
+		results2 = new FolderInfo(results1.getFolder(), method);
 
 		try {
 			doStep1(results1.getFolder(), results2);
 		} catch (Exception e) {
 			e.printStackTrace();
 		}
+		// Saving results2 into a file for further use as results1
+		savedChecksum.delete();
+		ObjectOutputStream oos;
+		try {
+			savedChecksum.createNewFile();
+			oos = new ObjectOutputStream(new FileOutputStream(savedChecksum));
+			oos.writeObject(results2);
+			oos.close();
+		} catch (IOException e1) {
+			e1.printStackTrace();
+		}
+
 		if (debugOn) {
 			System.out.println("[debug output results2:]");
 			printmap(results2.getIds());
@@ -250,22 +272,24 @@ public class Copier {
 			System.out.println("Nothing changed in source folder " + results1.getFolder().getAbsolutePath());
 		}
 
-		targetState = new FolderInfo(target);
-		try {
-			doStep1(targetState.getFolder(), targetState);
-		} catch (Exception e) {
-			e.printStackTrace();
-		}
+		if (debugOn) {
+			targetState = new FolderInfo(target, method);
+			try {
+				doStep1(targetState.getFolder(), targetState);
+			} catch (Exception e) {
+				e.printStackTrace();
+			}
 
-		if (results2.equals(targetState)) {
-			System.out.println("Source and Target folders are equal.");
-			System.exit(0);
-		}
+			if (results2.equals(targetState)) {
+				System.out.println("Source and Target folders are equal.");
+				return;
+			}
 
-		if (!results1.equals(targetState)) {
-			System.out.println("Please first synchronize Target folder with Source folder, run Step 1,");
-			System.out.println("then make changes in source folder, then run Step 2");
-			System.exit(2);
+			if (!results1.equals(targetState)) {
+				System.out.println("Please first synchronize Target folder with Source folder, run Step 1,");
+				System.out.println("then make changes in source folder, then run Step 2");
+				System.exit(2);
+			}
 		}
 
 		Map<Identifier, List<String>> tableR = new HashMap<>();
@@ -319,7 +343,15 @@ public class Copier {
 
 				if (tableR.get(s).size() > tableI.get(s).size()) {
 					for (int i = minNlocs; i < tableR.get(s).size(); i++) {
+						File fold = (new File(target.getAbsolutePath(), tableR.get(s).get(i))).getParentFile();
 						deleteFileFrom(target.getAbsolutePath(), tableR.get(s).get(i));
+						if (fold.isDirectory()) {
+							if(!fold.getAbsolutePath().equals(target.getAbsolutePath())){
+								if(fold.delete()){
+									System.out.println("Folder deleted");
+								}
+							}
+						}
 					}
 				} else if (tableR.get(s).size() < tableI.get(s).size()) {
 					for (int i = minNlocs; i < tableI.get(s).size(); i++) {
@@ -329,7 +361,15 @@ public class Copier {
 				}
 
 				for (int i = 0; i < minNlocs; i++) {
+					File fold = (new File(target.getAbsolutePath(), tableR.get(s).get(i))).getParentFile();
 					moveFileFromTo(target.getAbsolutePath(), tableR.get(s).get(i), target.getAbsolutePath(), tableI.get(s).get(i));
+					if (fold.isDirectory()) {
+						if(!fold.getAbsolutePath().equals(target.getAbsolutePath())){
+							if(fold.delete()){
+								System.out.println("Folder deleted");
+							}
+						}
+					}
 				}
 				it1.remove();
 				tableI.remove(s);
@@ -337,7 +377,15 @@ public class Copier {
 				// {remove file s from Target folder from locations tableR.get(s);
 				// remove this s record from tableR: it1.remove();}
 				for (int i = 0; i < tableR.get(s).size(); i++) {
+					File fold = (new File(target.getAbsolutePath(), tableR.get(s).get(i))).getParentFile();
 					deleteFileFrom(target.getAbsolutePath(), tableR.get(s).get(i));
+					if (fold.isDirectory()) {
+						if(!fold.getAbsolutePath().equals(target.getAbsolutePath())){
+							if(fold.delete()){
+								System.out.println("Folder deleted");
+							}
+						}
+					}
 				}
 				it1.remove();
 			}
@@ -369,7 +417,7 @@ public class Copier {
 		if (file.exists()) {
 			file.delete();
 		} else {
-			System.out.println("Error deleting " + fromFolder + location);
+			System.out.println("Error deleting " + file.getAbsolutePath());
 		}
 	}
 
@@ -481,10 +529,12 @@ public class Copier {
 
 	private static class FolderInfo implements Serializable {
 		private static final long serialVersionUID = -4900864651526989655L;
+		private String method = null;
 		private File folder = null;
 		private Map<Identifier, List<String>> idsToLocs = new HashMap<>();
 
-		public FolderInfo(File folder) {
+		public FolderInfo(File folder, String method) {
+			this.method = method;
 			this.folder = folder;
 		}
 
@@ -503,6 +553,10 @@ public class Copier {
 
 		public List<String> getRelativePaths(Identifier id) {
 			return idsToLocs.get(id);
+		}
+
+		public String getMethod() {
+			return this.method;
 		}
 
 		@Override
