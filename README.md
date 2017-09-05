@@ -7,8 +7,8 @@ Its main advantage is doing the move operation instead of add/delete operation l
 
 ### Usage
 
-You need to run this program 2 times. First, before the rename and specify a source folder.
-Second, after the rename and specify a target folder.
+You need to run this program 2 times. First, before the modification and specify a source folder.
+Second, after the modification and specify a target folder.
 ```groovy
 java -jar mirror.copy.ver1.jar step1 -source <path_to_source_folder>
 ```
